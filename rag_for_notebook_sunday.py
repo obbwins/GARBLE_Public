@@ -41,6 +41,7 @@ class CustomTextGenerationPipeline:
        
         # Access logits and generated sequence
         for token_logits in outputs.scores:
+            token_logits = token_logits.clone().detach().requires_grad_(True)
             all_logits.append(token_logits)
 
         #logits = outputs.scores[-1]
