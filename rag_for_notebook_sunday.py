@@ -17,6 +17,12 @@ import nltk
 from transformers import AutoTokenizer, AutoModelForCausalLM
 EMBEDDING_MODEL_NAME = "thenlper/gte-small"
 pd.set_option("display.max_colwidth", None)
+torch.set_printoptions(threshold=None)
+
+#definitions
+
+
+
 
 class CustomTextGenerationPipeline:
     def __init__(self, model_id):
@@ -26,7 +32,7 @@ class CustomTextGenerationPipeline:
             attn_implementation="flash_attention_2", 
             device_map='auto', 
             trust_remote_code=True,
-            
+           
             do_sample = True,
            
         )
@@ -35,17 +41,38 @@ class CustomTextGenerationPipeline:
     def __call__(self, prompt, **kwargs):
         inputs = self.tokenizer(prompt, return_tensors="pt").to(REMOVED_SECRET)
         #print("Input IDs:\n", inputs['input_ids'])
+        attention_mask = inputs['attention_mask']
+
         all_logits = []
         # Generate output
-        outputs = REMOVED_SECRET(**inputs, streamer=self.streamer, output_hidden_states=True, output_scores=True, return_dict_in_generate=True, **kwargs)
+        with torch.enable_grad():
+
+            outputs = REMOVED_SECRET(**inputs,
+                                           streamer=self.streamer, 
+                                           output_hidden_states=True, 
+                                           output_scores=True, 
+                                           return_dict_in_generate=True, 
+                                           **kwargs
+                                        )
        
         # Access logits and generated sequence
         for token_logits in outputs.scores:
-            token_logits = token_logits.clone().detach().requires_grad_(True)
+            token_logits = token_logits.clone().requires_grad_(True)            
+            print("Token_Logits", token_logits)
+           # Check if all elements are -inf
+            all_negative_inf = torch.all(token_logits == -float('inf'))
+
+            if all_negative_inf:
+                print("All logits are -inf")
+            else:
+                print("Not all logits are -inf")
             all_logits.append(token_logits)
 
         #logits = outputs.scores[-1]
         all_logits = torch.cat(all_logits, dim=1) 
+        all_logits.retain_grad()
+        print("All_Logits:", all_logits)
+        
          #print("Logits:", logits)
         #logits = torch.stack(logits, dim=1)
         generated_sequence = outputs.sequences
@@ -142,7 +169,7 @@ def answer_with_rag(
 
     # Redact an answer
     print("=> Generating answer...")
-    generated_sequence, logits = llm(final_prompt, max_new_tokens=500, do_sample=True, temperature=0.3)
+    generated_sequence, logits = llm(final_prompt, max_new_tokens=50, do_sample=True, temperature=0.3)
     print("Generated Sequence (Token IDs):", generated_sequence[0])
     # Decode the entire generated sequence (including prompt)
     print("Logits:", logits)
@@ -179,7 +206,7 @@ from ragatouille import RAGPretrainedModel
 
 
 
-   
+#if __name__ == '__main__':
 
 pdf_folder_path = "local_database" #filepath to local folder
 
@@ -213,7 +240,7 @@ model_id = "microsoft/Phi-3-mini-4k-instruct"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
     #streamer = TextStreamer(tokenizer, skip_prompt=True)
     #Initialise Pipeline
-READER_LLM = CustomTextGenerationPipeline(model_id="microsoft/Phi-3-mini-4k-instruct")
+READER_LLM = CustomTextGenerationPipeline(model_id="microsoft/Phi-3-mini-128k-instruct")
     #print(type(READER_LLM))
 RERANKER = RAGPretrainedModel.from_pretrained("colbert-ir/colbertv2.0")
     
