@@ -58,7 +58,7 @@ class CustomTextGenerationPipeline:
         # Access logits and generated sequence
         for token_logits in outputs.scores:
             token_logits = token_logits.clone().requires_grad_(True)
-            print("Token_Logits", token_logits)
+            #print("Token_Logits", token_logits)
            # Check if all elements are -inf
             all_negative_inf = torch.all(token_logits == -float('inf'))
 
@@ -168,13 +168,13 @@ def answer_with_rag(
     context = "\nExtracted documents:\n"
     context += "".join([f"Document {str(i)}:::\n" + doc for i, doc in enumerate(relevant_docs)])
     final_prompt = RAG_PROMPT_TEMPLATE.format(question=question, context=context)
-    print(final_prompt)
+    #print(final_prompt)
     #print("Final Prompt:\n", final_prompt)
 
     # Redact an answer
     print("=> Generating answer...")
     generated_sequence, logits = llm(final_prompt, max_new_tokens=50, do_sample=True, temperature=0.3)
-    print("Generated Sequence (Token IDs):", generated_sequence[0])
+    #print("Generated Sequence (Token IDs):", generated_sequence[0])
     # Decode the entire generated sequence (including prompt)
     print("Logits:", logits)
     full_decoded_text = REMOVED_SECRET(generated_sequence[0], skip_special_tokens=False)
