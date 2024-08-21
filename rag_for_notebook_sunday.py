@@ -57,7 +57,7 @@ class CustomTextGenerationPipeline:
        
         # Access logits and generated sequence
         for token_logits in outputs.scores:
-            token_logits = token_logits.clone().requires_grad_(True)            
+            token_logits = token_logits.clone().requires_grad_(True)
             print("Token_Logits", token_logits)
            # Check if all elements are -inf
             all_negative_inf = torch.all(token_logits == -float('inf'))
@@ -66,6 +66,10 @@ class CustomTextGenerationPipeline:
                 print("All logits are -inf")
             else:
                 print("Not all logits are -inf")
+
+            REMOVED_SECRET.clip_grad_norm_(REMOVED_SECRET(), max_norm=1.0)           
+
+            
             all_logits.append(token_logits)
 
         #logits = outputs.scores[-1]
@@ -240,7 +244,8 @@ model_id = "microsoft/Phi-3-mini-4k-instruct"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
     #streamer = TextStreamer(tokenizer, skip_prompt=True)
     #Initialise Pipeline
-READER_LLM = CustomTextGenerationPipeline(model_id="microsoft/Phi-3-mini-128k-instruct")
+
+READER_LLM = CustomTextGenerationPipeline(model_id="microsoft/Phi-3-mini-4k-instruct")
     #print(type(READER_LLM))
 RERANKER = RAGPretrainedModel.from_pretrained("colbert-ir/colbertv2.0")
     
