@@ -14,13 +14,15 @@ import matplotlib.pyplot as plt
 from transformers import AutoTokenizer, TextStreamer
 from ragatouille import RAGPretrainedModel
 import nltk
+import torch
+import REMOVED_SECRET as F
 from transformers import AutoTokenizer, AutoModelForCausalLM
+from loss_functions import weighted_loss
 EMBEDDING_MODEL_NAME = "thenlper/gte-small"
 pd.set_option("display.max_colwidth", None)
 torch.set_printoptions(threshold=None)
 
 #definitions
-
 
 
 
@@ -38,15 +40,21 @@ class CustomTextGenerationPipeline:
         )
         self.tokenizer = AutoTokenizer.from_pretrained(model_id)
         self.streamer = TextStreamer(self.tokenizer, skip_prompt=True)
-    def __call__(self, prompt, **kwargs):
+        
+    def __call__(self, prompt, labels=None, **kwargs):
+        #tokenize input
         inputs = self.tokenizer(prompt, return_tensors="pt").to(REMOVED_SECRET)
-        #print("Input IDs:\n", inputs['input_ids'])
-        attention_mask = inputs['attention_mask']
+        #inputs['input_ids'].requires_grad_(True) #enable gradient computation on input IDs
+        input_ids = inputs["input_ids"]
+        input_embeddings = REMOVED_SECRET()(input_ids)
 
+        input_embeddings.requires_grad_(True)
+        input_embeddings.retain_grad()
+        #attention_mask = inputs['attention_mask']
+        #forward pass with gradient computation enabled
         all_logits = []
         # Generate output
         with torch.enable_grad():
-
             outputs = REMOVED_SECRET(**inputs,
                                            streamer=self.streamer, 
                                            output_hidden_states=True, 
@@ -55,35 +63,51 @@ class CustomTextGenerationPipeline:
                                            **kwargs
                                         )
        
-        # Access logits and generated sequence
+        # Collect logits from generation process
         for token_logits in outputs.scores:
             token_logits = token_logits.clone().requires_grad_(True)
+            token_logits.retain_grad() #retain grad for later on
             #print("Token_Logits", token_logits)
-           # Check if all elements are -inf
-            all_negative_inf = torch.all(token_logits == -float('inf'))
-
-            if all_negative_inf:
-                print("All logits are -inf")
-            else:
-                print("Not all logits are -inf")
-
-            REMOVED_SECRET.clip_grad_norm_(REMOVED_SECRET(), max_norm=1.0)           
-
             
-            all_logits.append(token_logits)
+            #REMOVED_SECRET.clip_grad_norm_(REMOVED_SECRET(), max_norm=1.0)           
 
-        #logits = outputs.scores[-1]
-        all_logits = torch.cat(all_logits, dim=1) 
-        all_logits.retain_grad()
-        print("All_Logits:", all_logits)
+            all_logits.append(token_logits) #append to list
+
         
-         #print("Logits:", logits)
-        #logits = torch.stack(logits, dim=1)
+        all_logits = torch.cat(all_logits, dim=1) #stack logits across generated tokens
+        print("Grad?", all_logits.grad)
+        all_logits.retain_grad() 
+        
+        print("All_Logits:", all_logits)
+
+        #if labels is None:
+           # labels = inputs['input_ids'][:, 1:].contiguous().view(-1)
+            #all_logits = all_logits[:, :-1, :].contiguous().view(-1, all_logits.size(-1))
+       
+        #required for loss - testing
+        crucial_phrase = "I'm sorry"
+        target_response = "I'm sorry, I can't help with that."
+        target_response_tokens = tokenizer.encode(target_response, return_tensors='pt').squeeze().to(REMOVED_SECRET)
+        crucial_indices = [i for i, token in enumerate(target_response_tokens) if tokenizer.decode([token]) in crucial_phrase.split()]
+
+        
+
+        
+        loss = weighted_loss(all_logits, target_response_tokens, crucial_indices, weight=0.5)
+
+        loss.backward()
+     
+        print("Grad? 2", all_logits.grad)
+        
+        input_gradients = input_embeddings.grad
+        print("Input Gradients:", input_gradients)
+        #input_gradients.retain_grad()
+       
         generated_sequence = outputs.sequences
 
         
 
-        return generated_sequence, all_logits
+        return generated_sequence, all_logits, input_gradients
 
 
 
@@ -173,7 +197,7 @@ def answer_with_rag(
 
     # Redact an answer
     print("=> Generating answer...")
-    generated_sequence, logits = llm(final_prompt, max_new_tokens=50, do_sample=True, temperature=0.3)
+    generated_sequence, logits, input_gradients = llm(final_prompt, max_new_tokens=50, do_sample=True, temperature=0.3)
     #print("Generated Sequence (Token IDs):", generated_sequence[0])
     # Decode the entire generated sequence (including prompt)
     print("Logits:", logits)
@@ -201,8 +225,8 @@ def answer_with_rag(
 
     #print("Decoded Answer:\n", answer)
     #logits = torch.tensor(outputs.logits) if not isinstance(outputs.logits, torch.Tensor) else outputs.logits
-    
-    return answer, relevant_docs, logits
+    print("Input Gradients:", input_gradients)
+    return answer, relevant_docs, logits, input_gradients
 
 
 # optionally, load a reranker
@@ -309,7 +333,7 @@ RAG_PROMPT_TEMPLATE = tokenizer.apply_chat_template(
 
 question = "What is the capital of France?"
 
-answer, relevant_docs, logits = answer_with_rag(question, READER_LLM, KNOWLEDGE_VECTOR_DATABASE)
+answer, relevant_docs, logits, input_gradients = answer_with_rag(question, READER_LLM, KNOWLEDGE_VECTOR_DATABASE)
 
 print("==================================Answer==================================")
 print(f"{answer}")
