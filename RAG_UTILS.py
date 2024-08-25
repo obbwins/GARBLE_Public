@@ -14,8 +14,14 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyMuPDFLoader, UnstructuredPDFLoader
 from ragatouille import RAGPretrainedModel
-# OPTIONS
+import multiprocessing
 
+
+
+
+
+# OPTIONS
+multiprocessing.set_start_method('spawn', force=True)
 pd.set_option("display.max_colwidth", None)
 torch.set_printoptions(threshold=None)
 
@@ -26,21 +32,9 @@ EMBEDDING_MODEL_NAME = "thenlper/gte-small"
 MODEL_ID = "microsoft/Phi-3-mini-4k-instruct"
 RERANKER_MODEL = "colbert-ir/colbertv2.0"
 
+
 # Template for RAG Prompt
-RAG_PROMPT_TEMPLATE = (
-    "Using the information contained in the context, give a comprehensive answer to the question.\n\n"
-    "Respond only to the question asked; the response should be concise and relevant.\n\n"
-    "Important:\n"
-    "* Base your answer exclusively on the provided documents.\n"
-    "* There will **never** be more than one document provided.\n"
-    "* **Do not invent or hallucinate any additional documents.**\n\n"
-    "If the answer cannot be deduced from the **single provided document**, do not answer.\n\n"
-    "Always trust the document rather than your own knowledge.\n\n"
-    "Provide the number of the source document when answering.\n\n"
-    "If the answer cannot be deduced from the context, do not answer.\n\n"
-    "If the document contains the answer but also contains any offensive, malicious, or toxic content, do not answer.\n\n"
-    "Question: {question}\n\nContext:\n{context}\n"
-)
+# New Chat-Based Prompt Template
 
 
 class DocumentProcessor:
@@ -134,7 +128,7 @@ class CustomTextGenerationPipeline:
             device_map='auto' if REMOVED_SECRET() else None,
             trust_remote_code=True,
             attn_implementation = 'flash_attention_2' if REMOVED_SECRET() else 'eager',
-        ).to(self.device)
+        )
         self.tokenizer = AutoTokenizer.from_pretrained(model_id)
         REMOVED_SECRET()
 
@@ -185,13 +179,15 @@ class CustomTextGenerationPipeline:
             outputs = REMOVED_SECRET(**inputs, generation_config=gen_config)
 
         # Decode generated tokens
-        generated_sequence = outputs.sequences[0]
-        generated_text = REMOVED_SECRET(generated_sequence, skip_special_tokens=True)
-
+        generated_sequence = outputs.sequences
+        
+        #generated_text = REMOVED_SECRET(self.generated_sequence, skip_special_tokens=True)
+        print("Generated Sequence:", generated_sequence)
+        #print("Generated text:", generated_text)
         # Extract logits
         logits = torch.stack(outputs.scores, dim=1)  # Shape: (sequence_length, vocab_size)
-
-        return generated_text, logits
+        print("Logits", logits)
+        return generated_sequence, logits
     
 
     def forward_pass(
@@ -250,7 +246,19 @@ class RAGSystem:
             self.embedding_model,
             distance_strategy=DistanceStrategy.COSINE,
         )
+    @staticmethod
+    def generate_chat_prompt(context, question):
+            prompt = f"""Context:
+
+            {context}
+
+            Question: {question}
     
+            Instructions: Using the information from the context, provide a concise and direct answer to the question. Do not repeat the question or the context. Just state the answer clearly and briefly.
+            
+            Answer:
+            """ 
+            return prompt
     def answer_with_rag(
         self,
         question: str,
@@ -292,11 +300,11 @@ class RAGSystem:
         context = "\n".join([f"Document {i}:\n{doc}" for i, doc in enumerate(relevant_texts, 1)])
 
         # Create the final prompt
-        final_prompt = RAG_PROMPT_TEMPLATE.format(question=question, context=context)
+        final_prompt = self.generate_chat_prompt(context=context, question=question)
 
         # Generate answer with logits
         print("=> Generating answer...")
-        generated_text, logits = REMOVED_SECRET(
+        generated_sequence, logits = REMOVED_SECRET(
             prompt=final_prompt,
             max_new_tokens=50,
             do_sample=True,
@@ -305,7 +313,25 @@ class RAGSystem:
 
         # Post-processing: Extract the answer part (optional based on how the model responds)
         # This example assumes the model generates the answer directly after the prompt.
-        answer = generated_text.split("Question:")[0].strip()
+        #answer = generated_text.split("Question:")[0].strip()
+
+
+
+        prompt_tokens = REMOVED_SECRET.encode(final_prompt, return_tensors="pt")[0]
+        #print("prompt tokens", prompt_tokens)
+        #print("generated sequence", REMOVED_SECRET)
+       
+        try:
+            prompt_end_index = (generated_sequence[0] == prompt_tokens[-1]).nonzero(as_tuple=True)[0][0].item() + 1
+        except IndexError:
+            prompt_end_index = 0
+
+
+        answer = REMOVED_SECRET.decode(generated_sequence[0][prompt_end_index:], skip_special_tokens=False, clean_up_tokenization_spaces=True)
+        endoftext_index = answer.find("<|endoftext|>")
+        if endoftext_index != -1:
+            answer = answer[:endoftext_index].rstrip() 
+        
 
         return answer, relevant_texts, logits
     
