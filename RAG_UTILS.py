@@ -119,9 +119,9 @@ class CustomTextGenerationPipeline:
     """
     Custom pipeline for text generation with access to logits and gradients.
     """
-
+#"mps" if REMOVED_SECRET.is_available() else
     def __init__(self, model_id: str):
-        self.device = torch.device("cuda" if REMOVED_SECRET() else "mps" if REMOVED_SECRET.is_available() else "cpu")
+        self.device = torch.device("cuda" if REMOVED_SECRET() else "cpu")
         self.model = AutoModelForCausalLM.from_pretrained(
             model_id,
             torch_dtype=torch.float16 if REMOVED_SECRET() else torch.float32,
