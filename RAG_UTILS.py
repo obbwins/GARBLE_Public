@@ -15,7 +15,7 @@ from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyMuPDFLoader, UnstructuredPDFLoader
 from ragatouille import RAGPretrainedModel
 import multiprocessing
-
+import tiktoken
 
 
 
@@ -246,6 +246,29 @@ class RAGSystem:
             self.embedding_model,
             distance_strategy=DistanceStrategy.COSINE,
         )
+    
+    def query_rag_system(self, question: str, knowledge_index: FAISS, num_retrieved_docs: int = 30, num_docs_final: int = 1) -> Tuple[str, List[str], torch.Tensor]:
+        """
+        Queries the RAG system with the given question.
+
+        Args:
+            question (str): The question to ask.
+            knowledge_index (FAISS): The FAISS index to search.
+            num_retrieved_docs (int, optional): Number of documents to retrieve. Defaults to 30.
+            num_docs_final (int, optional): Number of documents to use after reranking. Defaults to 1.
+
+        Returns:
+            Tuple[str, List[str], torch.Tensor]: Generated answer, list of relevant documents, and logits tensor.
+        """
+        return self.answer_with_rag(
+            question=question,
+            knowledge_index=knowledge_index,
+            num_retrieved_docs=num_retrieved_docs,
+            num_docs_final=num_docs_final
+        )
+
+
+
     @staticmethod
     def generate_chat_prompt(context, question):
             prompt = f"""Context:
@@ -384,6 +407,18 @@ def main(question: str, pdf_folder_path: str) -> Tuple[str, List[str]]:
 
     return answer, relevant_docs
 
+
+
+def generate_vocab_list(vocab_size=50257):
+    encoding = tiktoken.encoding_for_model("text-embedding-3-small")
+    vocab_list = []
+    for token_id in range(vocab_size):
+        try:
+            token = encoding.decode([token_id])
+            vocab_list.append(token)
+        except KeyError:
+            pass
+    return vocab_list
 
 
 if __name__ == "__main__":
