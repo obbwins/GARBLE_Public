@@ -67,8 +67,9 @@ class DocumentProcessor:
                     print(f"Skipping empty file: {pdf_file}")
                     continue #move to next file
 
-                loader = PyMuPDFLoader(pdf_path)
+                loader = UnstructuredPDFLoader(pdf_path)
                 loaded_docs = loader.load()
+                
                 documents.extend(
                     LangchainDocument(
                         page_content=doc.page_content, metadata={"source": REMOVED_SECRET("source", pdf_file)}
@@ -77,6 +78,7 @@ class DocumentProcessor:
                 )
             except Exception as e:
                 print(f"Error loading file {pdf_file}: {e}")
+        print("Documents:", documents)
         return documents
     
 
