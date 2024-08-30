@@ -184,11 +184,11 @@ class CustomTextGenerationPipeline:
         generated_sequence = outputs.sequences
         
         #generated_text = REMOVED_SECRET(self.generated_sequence, skip_special_tokens=True)
-        print("Generated Sequence:", generated_sequence)
+        #print("Generated Sequence:", generated_sequence)
         #print("Generated text:", generated_text)
         # Extract logits
         logits = torch.stack(outputs.scores, dim=1)  # Shape: (sequence_length, vocab_size)
-        print("Logits", logits)
+        #print("Logits", logits)
         return generated_sequence, logits
     
 
@@ -273,16 +273,13 @@ class RAGSystem:
 
     @staticmethod
     def generate_chat_prompt(context, question):
-            prompt = f"""Context:
-
-            {context}
+            prompt = f"""Context: {context}
 
             Question: {question}
     
             Instructions: Using the information from the context, provide a concise and direct answer to the question. Do not repeat the question or the context. Just state the answer clearly and briefly.
             
-            Answer:
-            """ 
+            Answer: """ 
             return prompt
     def answer_with_rag(
         self,
@@ -290,6 +287,10 @@ class RAGSystem:
         knowledge_index: FAISS,
         num_retrieved_docs: int = 30,
         num_docs_final: int = 1,
+        max_new_tokens: int = 500,
+        batch_size: int = 10,
+        temperature: float = 0.3,
+        top_k: int = 50
     ) -> Tuple[str, List[str], torch.Tensor]:
         """
         Generates an answer to the given question using RAG.
@@ -327,38 +328,28 @@ class RAGSystem:
         # Create the final prompt
         final_prompt = self.generate_chat_prompt(context=context, question=question)
 
+        #tokenize prompt
+        input_ids = REMOVED_SECRET.encode(final_prompt, return_tensors="pt").to(REMOVED_SECRET)
+        if input_ids.dim()==1:
+            input_ids = input_ids.unsqueeze(0)
         # Generate answer with logits
         print("=> Generating answer...")
-        generated_sequence, logits = REMOVED_SECRET(
-            prompt=final_prompt,
-            max_new_tokens=50,
-            do_sample=True,
-            temperature=0.3,
-        )
+        generated_ids = self._generate_with_kv_cache_and_batching(
+            input_ids,
+            max_new_tokens, 
+            batch_size,
+            temperature=temperature,
+            top_k=top_k
+            )
+         # Decode the generated answer
+        answer = REMOVED_SECRET.decode(generated_ids[0, input_ids.shape[1]:], skip_special_tokens=True)
 
-        # Post-processing: Extract the answer part (optional based on how the model responds)
-        # This example assumes the model generates the answer directly after the prompt.
-        #answer = generated_text.split("Question:")[0].strip()
+         # Get the final logits 
+        with torch.no_grad():
+            final_logits = REMOVED_SECRET(generated_ids).logits
 
-
-
-        prompt_tokens = REMOVED_SECRET.encode(final_prompt, return_tensors="pt")[0]
-        #print("prompt tokens", prompt_tokens)
-        #print("generated sequence", REMOVED_SECRET)
-       
-        try:
-            prompt_end_index = (generated_sequence[0] == prompt_tokens[-1]).nonzero(as_tuple=True)[0][0].item() + 1
-        except IndexError:
-            prompt_end_index = 0
-
-
-        answer = REMOVED_SECRET.decode(generated_sequence[0][prompt_end_index:], skip_special_tokens=False, clean_up_tokenization_spaces=True)
-        endoftext_index = answer.find("<|endoftext|>")
-        if endoftext_index != -1:
-            answer = answer[:endoftext_index].rstrip() 
-        
-
-        return answer, relevant_texts, logits
+        return answer, relevant_texts, final_logits
+    
     
 
 
@@ -374,7 +365,38 @@ class RAGSystem:
         REMOVED_SECRET()
         gc.collect()
 
+    def _generate_with_kv_cache_and_batching(self, input_ids, max_new_tokens, batch_size, temperature = 0.3, top_k = 50):
+        generated = input_ids
+        past_key_values = None
+        
+        for i in range(0, max_new_tokens, batch_size):
+            # Adjust batch_size for the last iteration if necessary
+            current_batch_size = min(batch_size, max_new_tokens - i)
+            
+            with torch.no_grad():
+                outputs = REMOVED_SECRET(
+                    input_ids=generated[:, -1:] if past_key_values is not None else generated,
+                    past_key_values=past_key_values,
+                    use_cache=True
+                )
+            
+            next_token_logits = outputs.logits[:, -1, :] / temperature
+            past_key_values = outputs.past_key_values
 
+
+            top_k_logits, top_k_indices = torch.topk(next_token_logits, k=top_k, dim=-1)
+            probs = F.softmax(top_k_logits, dim=-1)
+            # Generate multiple tokens at once
+            next_token_index = torch.multinomial(probs, num_samples=1)
+            next_token = top_k_indices.gather(-1, next_token_index)
+            #next_token = next_token.view(generated.shape[0], -1)
+            generated = torch.cat([generated, next_token], dim=-1)
+
+            # Check for EOS token
+            if next_token.item() == REMOVED_SECRET.eos_token_id:
+                break
+
+        return generated
 
 def main(question: str, pdf_folder_path: str) -> Tuple[str, List[str]]:
     """
