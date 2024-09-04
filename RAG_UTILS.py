@@ -27,9 +27,9 @@ torch.set_printoptions(threshold=None)
 
 
 # CONSTANTS
-
+#"microsoft/Phi-3-mini-4k-instruct"
 EMBEDDING_MODEL_NAME = "thenlper/gte-small"
-MODEL_ID = "microsoft/Phi-3-mini-4k-instruct"
+MODEL_ID = "nvidia/Mistral-NeMo-Minitron-8B-Base"
 RERANKER_MODEL = "colbert-ir/colbertv2.0"
 
 
@@ -287,7 +287,7 @@ class RAGSystem:
         knowledge_index: FAISS,
         num_retrieved_docs: int = 30,
         num_docs_final: int = 1,
-        max_new_tokens: int = 500,
+        max_new_tokens: int = 250,
         batch_size: int = 10,
         temperature: float = 0.3,
         top_k: int = 50
