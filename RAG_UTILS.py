@@ -27,14 +27,16 @@ torch.set_printoptions(threshold=None)
 
 
 # CONSTANTS
+#nvidia/Mistral-NeMo-Minitron-8B-Base
 #"microsoft/Phi-3-mini-4k-instruct"
+MODEL_ID = "microsoft/Phi-3-mini-4k-instruct"
+
 EMBEDDING_MODEL_NAME = "thenlper/gte-small"
-MODEL_ID = "nvidia/Mistral-NeMo-Minitron-8B-Base"
+#MODEL_ID = "nvidia/Mistral-NeMo-Minitron-8B-Base"
 RERANKER_MODEL = "colbert-ir/colbertv2.0"
 
 
-# Template for RAG Prompt
-# New Chat-Based Prompt Template
+
 
 
 class DocumentProcessor:
@@ -146,10 +148,10 @@ class CustomTextGenerationPipeline:
         """
         return REMOVED_SECRET()(input_ids)
     
-    def generate_with_logits(
+    def generate_with_logits( #not used for final implementation
         self,
         prompt: str,
-        max_new_tokens: int = 50,
+        max_new_tokens: int = 200,
         do_sample: bool = True,
         temperature: float = 0.3,
     ) -> Tuple[str, torch.Tensor]:
@@ -174,6 +176,7 @@ class CustomTextGenerationPipeline:
             temperature=temperature,
             output_scores=True,
             return_dict_in_generate=True,
+            eos_token_id=REMOVED_SECRET("END")[0]
         )
 
         # Perform generation
@@ -192,7 +195,7 @@ class CustomTextGenerationPipeline:
         return generated_sequence, logits
     
 
-    def forward_pass(
+    def forward_pass( #not used for final implementation
         self,
         prompt: str,
         labels: Optional[torch.Tensor] = None,
@@ -210,7 +213,7 @@ class CustomTextGenerationPipeline:
         inputs = self.tokenizer(prompt, return_tensors="pt").to(self.device)
         if labels is not None:
             inputs["labels"] = labels.to(self.device)
-
+        
         outputs = self.model(**inputs, output_hidden_states=True)
         logits = outputs.logits
         return logits
@@ -273,14 +276,16 @@ class RAGSystem:
 
     @staticmethod
     def generate_chat_prompt(context, question):
-            prompt = f"""Context: {context}
+        prompt = f"""Context: {context}
 
-            Question: {question}
-    
-            Instructions: Using the information from the context, provide a concise and direct answer to the question. Do not repeat the question or the context. Just state the answer clearly and briefly.
-            
-            Answer: """ 
-            return prompt
+        Question: {question}
+
+        Instructions: Using the information from the context, provide a concise and direct answer to the question.
+        Do not include any part of this prompt or the context in your answer. Do not say 'context' or 'document'. Just state the answer clearly and briefly.
+
+        Answer:
+        """
+        return prompt
     def answer_with_rag(
         self,
         question: str,
@@ -290,7 +295,7 @@ class RAGSystem:
         max_new_tokens: int = 250,
         batch_size: int = 10,
         temperature: float = 0.3,
-        top_k: int = 50
+        top_k: int = 100
     ) -> Tuple[str, List[str], torch.Tensor]:
         """
         Generates an answer to the given question using RAG.
@@ -348,6 +353,10 @@ class RAGSystem:
         with torch.no_grad():
             final_logits = REMOVED_SECRET(generated_ids).logits
 
+        # Clean up the answer
+        answer = answer.split("END")[0].strip()  # Remove everything after "END"
+        answer = answer.replace("Answer:", "").strip()  # Remove "Answer:" if present
+
         return answer, relevant_texts, final_logits
     
     
@@ -365,7 +374,7 @@ class RAGSystem:
         REMOVED_SECRET()
         gc.collect()
 
-    def _generate_with_kv_cache_and_batching(self, input_ids, max_new_tokens, batch_size, temperature = 0.3, top_k = 50):
+    def _generate_with_kv_cache_and_batching(self, input_ids, max_new_tokens, batch_size, temperature = 0.3, top_k = 100): #we use this one for algorithm
         generated = input_ids
         past_key_values = None
         
@@ -389,9 +398,7 @@ class RAGSystem:
             # Generate multiple tokens at once
             next_token_index = torch.multinomial(probs, num_samples=1)
             next_token = top_k_indices.gather(-1, next_token_index)
-            #next_token = next_token.view(generated.shape[0], -1)
             generated = torch.cat([generated, next_token], dim=-1)
-
             # Check for EOS token
             if next_token.item() == REMOVED_SECRET.eos_token_id:
                 break
@@ -446,7 +453,7 @@ def generate_vocab_list(vocab_size=50257):
 
 
 if __name__ == "__main__":
-    question = "What is the capital of France?"
+    question = "What is the capital of France?" #for testing 
 
     pdf_folder_path = "local_database" 
 
